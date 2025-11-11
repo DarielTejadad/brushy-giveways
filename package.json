@@ -1,0 +1,17 @@
+{
+  "name": "brushy-giveaways",
+  "version": "1.0.0",
+  "description": "Bot de sorteos para Brush Studio",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "ws": "^8.14.2",
+    "ms": "^2.1.3"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
