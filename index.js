@@ -15,8 +15,8 @@ const client = new Client({
 // Configuración
 const CONFIG = {
   giveawayChannelId: '1437620678034460906', // Canal donde se enviarán los sorteos
-  staffRoleId: 'ID_DEL_ROL_STAFF', // Reemplaza con tu rol de staff
-  ticketCategoryId: 'ID_CATEGORIA_TICKETS', // Reemplaza con la categoría de tickets
+  staffRoleId: '1437618918997884968', // Reemplaza con tu rol de staff
+  ticketCategoryId: '1437619974054084618', // Reemplaza con la categoría de tickets
   staffRoles: [
     '1437618918997884968', // Rol de staff 1
     '1437623026911805511', // Rol de staff 2
@@ -27,7 +27,8 @@ const CONFIG = {
 // Almacenamiento de sorteos activos
 const activeGiveaways = new Map();
 
-client.on('ready', () => {
+// Usar clientReady en lugar de ready (v14)
+client.on('clientReady', () => {
   console.log(`✅ Bot Giveaways conectado como ${client.user.tag}`);
   
   // Registrar comandos slash
@@ -127,7 +128,7 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(0xFF0000)
             .setDescription('Necesitas un rol de staff para usar este comando.')
         ],
-        ephemeral: true
+        flags: [1 << 6] // Ephemeral flag en v14
       });
     }
     
@@ -156,7 +157,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: '❌ Ocurrió un error al procesar tu solicitud. Por favor, inténtalo más tarde.',
-          ephemeral: true
+          flags: [1 << 6] // Ephemeral flag en v14
         });
       } else if (interaction.deferred && !interaction.replied) {
         await interaction.editReply({
@@ -177,7 +178,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
             content: '❌ Ocurrió un error al unirte al sorteo. Por favor, inténtalo más tarde.',
-            ephemeral: true
+            flags: [1 << 6] // Ephemeral flag en v14
           });
         }
       }
@@ -188,7 +189,7 @@ client.on('interactionCreate', async (interaction) => {
 // Función para crear un sorteo
 async function createGiveaway(interaction) {
   // Usar deferReply para evitar timeout
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   const duration = interaction.options.getString('duration');
   const prizes = interaction.options.getString('premios');
@@ -267,7 +268,7 @@ async function createGiveaway(interaction) {
 
 // Función para unirse a un sorteo
 async function joinGiveaway(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   const giveawayId = interaction.customId.split('_')[2];
   const giveaway = activeGiveaways.get(giveawayId);
@@ -317,7 +318,7 @@ async function updateGiveawayMessage(giveawayId) {
 
 // Función para anunciar ganadores manualmente
 async function announceWinners(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   const messageId = interaction.options.getString('message_id');
   const winnersInput = interaction.options.getString('ganadores');
@@ -441,7 +442,7 @@ async function endGiveawayAutomatically(giveawayId) {
 
 // Función para finalizar un sorteo manualmente
 async function endGiveaway(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   const messageId = interaction.options.getString('message_id');
   const giveaway = Array.from(activeGiveaways.values()).find(g => g.messageId === messageId);
@@ -461,7 +462,7 @@ async function endGiveaway(interaction) {
 
 // Función para volver a sortear
 async function rerollGiveaway(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   const messageId = interaction.options.getString('message_id');
   const giveaway = Array.from(activeGiveaways.values()).find(g => g.messageId === messageId);
@@ -508,7 +509,7 @@ async function rerollGiveaway(interaction) {
 
 // Función para listar sorteos activos
 async function listGiveaways(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: [1 << 6] }); // Ephemeral flag en v14
   
   if (activeGiveaways.size === 0) {
     return await interaction.editReply({
