@@ -70,9 +70,9 @@ client.on('ready', () => {
             .setDescription('ID del mensaje del sorteo')
             .setRequired(true)
         )
-        .addUserOption(option =>
+        .addStringOption(option =>
           option.setName('ganadores')
-            .setDescription('Ganadores del sorteo')
+            .setDescription('Ganadores del sorteo (separados por comas o @menciones)')
             .setRequired(true)
         )
     )
@@ -131,35 +131,65 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
     
-    switch (subcommand) {
-      case 'create':
-        await createGiveaway(interaction);
-        break;
-      case 'announcement':
-        await announceWinners(interaction);
-        break;
-      case 'end':
-        await endGiveaway(interaction);
-        break;
-      case 'list':
-        await listGiveaways(interaction);
-        break;
-      case 'reroll':
-        await rerollGiveaway(interaction);
-        break;
+    try {
+      switch (subcommand) {
+        case 'create':
+          await createGiveaway(interaction);
+          break;
+        case 'announcement':
+          await announceWinners(interaction);
+          break;
+        case 'end':
+          await endGiveaway(interaction);
+          break;
+        case 'list':
+          await listGiveaways(interaction);
+          break;
+        case 'reroll':
+          await rerollGiveaway(interaction);
+          break;
+      }
+    } catch (error) {
+      console.error('Error en la interacción:', error);
+      
+      // Si la interacción no ha sido respondida, responder con un error
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: '❌ Ocurrió un error al procesar tu solicitud. Por favor, inténtalo más tarde.',
+          ephemeral: true
+        });
+      } else if (interaction.deferred && !interaction.replied) {
+        await interaction.editReply({
+          content: '❌ Ocurrió un error al procesar tu solicitud. Por favor, inténtalo más tarde.'
+        });
+      }
     }
   }
   
   // Manejar clics en botones de participación
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('giveaway_join_')) {
-      await joinGiveaway(interaction);
+      try {
+        await joinGiveaway(interaction);
+      } catch (error) {
+        console.error('Error en el botón de participación:', error);
+        
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '❌ Ocurrió un error al unirte al sorteo. Por favor, inténtalo más tarde.',
+            ephemeral: true
+          });
+        }
+      }
     }
   }
 });
 
 // Función para crear un sorteo
 async function createGiveaway(interaction) {
+  // Usar deferReply para evitar timeout
+  await interaction.deferReply({ ephemeral: true });
+  
   const duration = interaction.options.getString('duration');
   const prizes = interaction.options.getString('premios');
   const winnersCount = interaction.options.getInteger('ganadores');
@@ -169,9 +199,8 @@ async function createGiveaway(interaction) {
     // Convertir duración a milisegundos
     const durationMs = ms(duration);
     if (!durationMs) {
-      return interaction.reply({
-        content: '❌ Duración inválida. Usa formatos como: 1h, 30m, 2d',
-        ephemeral: true
+      return await interaction.editReply({
+        content: '❌ Duración inválida. Usa formatos como: 1h, 30m, 2d'
       });
     }
     
@@ -217,9 +246,8 @@ async function createGiveaway(interaction) {
     });
     
     // Confirmación
-    await interaction.reply({
-      content: `✅ Sorteo creado correctamente en ${channel}`,
-      ephemeral: true
+    await interaction.editReply({
+      content: `✅ Sorteo creado correctamente en ${channel}`
     });
     
     // Programar finalización del sorteo
@@ -231,30 +259,29 @@ async function createGiveaway(interaction) {
     
   } catch (error) {
     console.error('Error al crear sorteo:', error);
-    await interaction.reply({
-      content: '❌ Ocurrió un error al crear el sorteo. Por favor, inténtalo más tarde.',
-      ephemeral: true
+    await interaction.editReply({
+      content: '❌ Ocurrió un error al crear el sorteo. Por favor, inténtalo más tarde.'
     });
   }
 }
 
 // Función para unirse a un sorteo
 async function joinGiveaway(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
   const giveawayId = interaction.customId.split('_')[2];
   const giveaway = activeGiveaways.get(giveawayId);
   
   if (!giveaway) {
-    return interaction.reply({
-      content: '❌ Este sorteo ya ha finalizado o no existe.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ Este sorteo ya ha finalizado o no existe.'
     });
   }
   
   // Verificar si el usuario ya participa
   if (giveaway.participants.includes(interaction.user.id)) {
-    return interaction.reply({
-      content: '❌ Ya estás participando en este sorteo.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ Ya estás participando en este sorteo.'
     });
   }
   
@@ -265,9 +292,8 @@ async function joinGiveaway(interaction) {
   // Actualizar mensaje del sorteo
   await updateGiveawayMessage(giveawayId);
   
-  await interaction.reply({
-    content: '✅ ¡Te has unido al sorteo correctamente!',
-    ephemeral: true
+  await interaction.editReply({
+    content: '✅ ¡Te has unido al sorteo correctamente!'
   });
 }
 
@@ -291,17 +317,38 @@ async function updateGiveawayMessage(giveawayId) {
 
 // Función para anunciar ganadores manualmente
 async function announceWinners(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
   const messageId = interaction.options.getString('message_id');
-  const winners = interaction.options.getUser('ganadores');
+  const winnersInput = interaction.options.getString('ganadores');
   
   try {
     const channel = await client.channels.fetch(interaction.channelId);
     const message = await channel.messages.fetch(messageId);
     
     if (!message) {
-      return interaction.reply({
-        content: '❌ No se encontró el mensaje del sorteo.',
-        ephemeral: true
+      return await interaction.editReply({
+        content: '❌ No se encontró el mensaje del sorteo.'
+      });
+    }
+    
+    // Procesar los ganadores (pueden ser menciones o IDs)
+    const winners = [];
+    const winnerMentions = winnersInput.match(/<@!?(\d+)>/g) || [];
+    
+    for (const mention of winnerMentions) {
+      const userId = mention.match(/(\d+)/)[1];
+      try {
+        const user = await client.users.fetch(userId);
+        winners.push(user);
+      } catch (error) {
+        console.error(`No se pudo encontrar el usuario con ID ${userId}:`, error);
+      }
+    }
+    
+    if (winners.length === 0) {
+      return await interaction.editReply({
+        content: '❌ No se encontraron usuarios válidos. Usa menciones como @usuario.'
       });
     }
     
@@ -322,16 +369,14 @@ async function announceWinners(interaction) {
     // Crear tickets para cada ganador
     await createTicketsForWinners(winners, message.embeds[0].description.split('**Premios:** ')[1] || 'Premios no especificados');
     
-    await interaction.reply({
-      content: '✅ Ganadores anunciados correctamente.',
-      ephemeral: true
+    await interaction.editReply({
+      content: '✅ Ganadores anunciados correctamente.'
     });
     
   } catch (error) {
     console.error('Error al anunciar ganadores:', error);
-    await interaction.reply({
-      content: '❌ Ocurrió un error al anunciar los ganadores.',
-      ephemeral: true
+    await interaction.editReply({
+      content: '❌ Ocurrió un error al anunciar los ganadores.'
     });
   }
 }
@@ -396,17 +441,17 @@ async function endGiveawayAutomatically(giveawayId) {
 
 // Función para finalizar un sorteo manualmente
 async function endGiveaway(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
   const messageId = interaction.options.getString('message_id');
   const giveaway = Array.from(activeGiveaways.values()).find(g => g.messageId === messageId);
   
   if (!giveaway) {
-    return interaction.reply({
-      content: '❌ No se encontró un sorteo activo con ese ID de mensaje.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ No se encontró un sorteo activo con ese ID de mensaje.'
     });
   }
   
-  await interaction.deferReply();
   await endGiveawayAutomatically(giveaway.messageId);
   
   await interaction.editReply({
@@ -416,20 +461,20 @@ async function endGiveaway(interaction) {
 
 // Función para volver a sortear
 async function rerollGiveaway(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
   const messageId = interaction.options.getString('message_id');
   const giveaway = Array.from(activeGiveaways.values()).find(g => g.messageId === messageId);
   
   if (!giveaway) {
-    return interaction.reply({
-      content: '❌ No se encontró un sorteo activo con ese ID de mensaje.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ No se encontró un sorteo activo con ese ID de mensaje.'
     });
   }
   
   if (giveaway.participants.length === 0) {
-    return interaction.reply({
-      content: '❌ No hay participantes en este sorteo.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ No hay participantes en este sorteo.'
     });
   }
   
@@ -455,7 +500,7 @@ async function rerollGiveaway(interaction) {
     .setFooter({ text: `Reroll por ${interaction.user.tag}` })
     .setTimestamp();
   
-  await interaction.reply({ embeds: [newWinnersEmbed] });
+  await interaction.editReply({ embeds: [newWinnersEmbed] });
   
   // Crear tickets para los nuevos ganadores
   await createTicketsForWinners(newWinners, giveaway.prizes);
@@ -463,10 +508,11 @@ async function rerollGiveaway(interaction) {
 
 // Función para listar sorteos activos
 async function listGiveaways(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
   if (activeGiveaways.size === 0) {
-    return interaction.reply({
-      content: '❌ No hay sorteos activos actualmente.',
-      ephemeral: true
+    return await interaction.editReply({
+      content: '❌ No hay sorteos activos actualmente.'
     });
   }
   
@@ -487,7 +533,7 @@ async function listGiveaways(interaction) {
     });
   }
   
-  await interaction.reply({ embeds: [listEmbed], ephemeral: true });
+  await interaction.editReply({ embeds: [listEmbed] });
 }
 
 // Función para crear tickets para los ganadores
