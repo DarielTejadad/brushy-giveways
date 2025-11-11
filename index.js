@@ -14,12 +14,13 @@ const client = new Client({
 
 // Configuración
 const CONFIG = {
-  giveawayChannelId: null, // Se definirá en cada sorteo
+  giveawayChannelId: '1437620678034460906', // Canal donde se enviarán los sorteos
   staffRoleId: 'ID_DEL_ROL_STAFF', // Reemplaza con tu rol de staff
   ticketCategoryId: 'ID_CATEGORIA_TICKETS', // Reemplaza con la categoría de tickets
-  allowedRoles: [
-    '1437623596322394142', // Cliente Premium
-    '1437623932529279047'  // Cliente
+  staffRoles: [
+    '1437618918997884968', // Rol de staff 1
+    '1437623026911805511', // Rol de staff 2
+    '1437623029634175047'  // Rol de staff 3
   ]
 };
 
@@ -32,7 +33,7 @@ client.on('ready', () => {
   // Registrar comandos slash
   const giveawayCommand = new SlashCommandBuilder()
     .setName('givaways')
-    .setDescription('Gestión de sorteos')
+    .setDescription('Gestión de sorteos (solo staff)')
     .addSubcommand(subcommand =>
       subcommand
         .setName('create')
@@ -56,7 +57,7 @@ client.on('ready', () => {
         )
         .addChannelOption(option =>
           option.setName('canal')
-            .setDescription('Canal donde se realizará el sorteo')
+            .setDescription('Canal donde se realizará el sorteo (opcional)')
             .setRequired(false)
         )
     )
@@ -90,6 +91,16 @@ client.on('ready', () => {
         .setName('list')
         .setDescription('Muestra todos los sorteos activos')
     )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('reroll')
+        .setDescription('Vuelve a sortear entre los participantes')
+        .addStringOption(option =>
+          option.setName('message_id')
+            .setDescription('ID del mensaje del sorteo')
+            .setRequired(true)
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.SendMessages);
   
   client.application.commands.set([giveawayCommand])
@@ -103,23 +114,21 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === 'givaways') {
     const subcommand = interaction.options.getSubcommand();
     
-    // Verificar si el usuario tiene permisos para crear sorteos
-    if (subcommand === 'create' || subcommand === 'announcement' || subcommand === 'end') {
-      const hasAllowedRole = interaction.member.roles.cache.some(role => 
-        CONFIG.allowedRoles.includes(role.id)
-      );
-      
-      if (!hasAllowedRole) {
-        return interaction.reply({
-          content: '❌ Este comando solo está disponible para clientes y clientes premium.',
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xFF0000)
-              .setDescription('Necesitas ser cliente o cliente premium para usar este comando.')
-          ],
-          ephemeral: true
-        });
-      }
+    // Verificar si el usuario tiene permisos de staff
+    const hasStaffRole = interaction.member.roles.cache.some(role => 
+      CONFIG.staffRoles.includes(role.id)
+    );
+    
+    if (!hasStaffRole) {
+      return interaction.reply({
+        content: '❌ Este comando solo está disponible para el staff.',
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setDescription('Necesitas un rol de staff para usar este comando.')
+        ],
+        ephemeral: true
+      });
     }
     
     switch (subcommand) {
@@ -134,6 +143,9 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'list':
         await listGiveaways(interaction);
+        break;
+      case 'reroll':
+        await rerollGiveaway(interaction);
         break;
     }
   }
@@ -151,7 +163,7 @@ async function createGiveaway(interaction) {
   const duration = interaction.options.getString('duration');
   const prizes = interaction.options.getString('premios');
   const winnersCount = interaction.options.getInteger('ganadores');
-  const channel = interaction.options.getChannel('canal') || interaction.channel;
+  const channel = interaction.options.getChannel('canal') || await client.channels.fetch(CONFIG.giveawayChannelId);
   
   try {
     // Convertir duración a milisegundos
@@ -402,6 +414,53 @@ async function endGiveaway(interaction) {
   });
 }
 
+// Función para volver a sortear
+async function rerollGiveaway(interaction) {
+  const messageId = interaction.options.getString('message_id');
+  const giveaway = Array.from(activeGiveaways.values()).find(g => g.messageId === messageId);
+  
+  if (!giveaway) {
+    return interaction.reply({
+      content: '❌ No se encontró un sorteo activo con ese ID de mensaje.',
+      ephemeral: true
+    });
+  }
+  
+  if (giveaway.participants.length === 0) {
+    return interaction.reply({
+      content: '❌ No hay participantes en este sorteo.',
+      ephemeral: true
+    });
+  }
+  
+  // Seleccionar nuevos ganadores
+  const newWinners = [];
+  const participantsCopy = [...giveaway.participants];
+  
+  for (let i = 0; i < Math.min(giveaway.winnersCount, participantsCopy.length); i++) {
+    const randomIndex = Math.floor(Math.random() * participantsCopy.length);
+    const winnerId = participantsCopy.splice(randomIndex, 1)[0];
+    newWinners.push(await client.users.fetch(winnerId));
+  }
+  
+  // Crear embed de nuevos ganadores
+  const newWinnersEmbed = new EmbedBuilder()
+    .setTitle('🎲 ¡NUEVOS GANADORES! 🎲')
+    .setDescription(`Se han seleccionado nuevos ganadores para el sorteo.`)
+    .addFields(
+      { name: '🎁 Premios', value: giveaway.prizes, inline: false },
+      { name: '🏆 Nuevos ganadores', value: newWinners.map(w => `${w}`).join(', '), inline: false }
+    )
+    .setColor(0xFFD700)
+    .setFooter({ text: `Reroll por ${interaction.user.tag}` })
+    .setTimestamp();
+  
+  await interaction.reply({ embeds: [newWinnersEmbed] });
+  
+  // Crear tickets para los nuevos ganadores
+  await createTicketsForWinners(newWinners, giveaway.prizes);
+}
+
 // Función para listar sorteos activos
 async function listGiveaways(interaction) {
   if (activeGiveaways.size === 0) {
@@ -481,8 +540,8 @@ async function createTicketsForWinners(winners, prizes) {
         .setColor(0xFFD700)
         .setFooter({ text: 'Brush Studio | Sorteos' });
       
-      // Enviar notificación al canal de staff (ajusta el ID según tu servidor)
-      const staffChannel = guild.channels.cache.find(c => c.name.includes('staff') || c.name.includes('panel'));
+      // Enviar notificación al canal de staff
+      const staffChannel = guild.channels.cache.get(CONFIG.giveawayChannelId);
       if (staffChannel) {
         await staffChannel.send({ embeds: [staffNotificationEmbed] });
       }
